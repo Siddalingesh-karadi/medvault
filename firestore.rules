@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function getPatient(patientId) {
+      return get(/databases/$(database)/documents/users/$(patientId)).data;
+    }
+
+    function isPatientSharing(patientId) {
+      let patient = getPatient(patientId);
+      return patient != null && patient.role == 'patient' && patient.isSharingEnabled == true;
+    }
+
+    // User Profile Rules
+    match /users/{userId} {
+      allow get: if isOwner(userId) || (isSignedIn() && isPatientSharing(userId));
+      allow list: if false; // No blanket listing of users
+      allow create: if isOwner(userId) && 
+                      request.resource.data.role in ['patient', 'doctor'] &&
+                      request.resource.data.name is string &&
+                      request.resource.data.email == request.auth.token.email;
+      allow update: if isOwner(userId) && 
+                      request.resource.data.role == resource.data.role; // Role shouldn't change
+
+      // Reminders Rules
+      match /reminders/{reminderId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Records Rules
+    match /records/{recordId} {
+      allow get: if isSignedIn() && (isOwner(resource.data.patientId) || isPatientSharing(resource.data.patientId));
+      allow list: if isSignedIn() && (isOwner(request.query.limit(10).patientId) || isPatientSharing(request.query.limit(10).patientId));
+      
+      // Specifically allow querying by patientId
+      allow list: if isSignedIn() && (
+        isOwner(resource.data.patientId) || 
+        (getPatient(resource.data.patientId).isSharingEnabled == true)
+      );
+
+      allow create: if isSignedIn() && isOwner(request.resource.data.patientId) && 
+                      request.resource.data.type in ['prescription', 'report'] &&
+                      request.resource.data.fileURL is string;
+      allow delete: if isSignedIn() && isOwner(resource.data.patientId);
+    }
+  }
+}

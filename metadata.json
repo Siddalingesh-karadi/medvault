@@ -1,0 +1,6 @@
+{
+  "name": "MedVault",
+  "description": "A portable digital health record system for patients and doctors with QR-based sharing and role-based access control.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
